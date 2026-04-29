@@ -30,8 +30,8 @@ def main():
             print(f"\n{'='*50}\n[{current_time.strftime('%H:%M:%S UTC')}] 🗽 US Market Open. Starting Analysis Scan...\n{'='*50}")
             
             for symbol in symbols_to_trade:
-                # 2. Fetch Data (15m Macro, 1m Micro)
-                df_macro = fetcher.fetch_ohlcv(symbol, '15m', limit=100)
+                # 2. Fetch Data (5m Macro, 1m Micro)
+                df_macro = fetcher.fetch_ohlcv(symbol, '5m', limit=100)
                 df_micro = fetcher.fetch_ohlcv(symbol, '1m', limit=100)
                 
                 if df_macro is None or df_micro is None:

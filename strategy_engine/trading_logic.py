@@ -27,12 +27,10 @@ class TradingStrategy:
         """
         Evaluates the 4 confirmations based on the strategy rules.
         """
-        if not self.check_time_filter(current_time):
-            return "NO_TRADE_TIME_FILTER"
-            
+        # Time filter is handled in main.py, so we proceed with evaluation here
         from technical_analysis.support_resistance import identify_pivots, get_recent_levels
         
-        # Calculate Macro (15m) Pivots
+        # Calculate Macro (5m) Pivots
         df_macro_pivots = identify_pivots(df_macro)
         levels_macro = get_recent_levels(df_macro_pivots, lookback=50)
         
@@ -43,6 +41,6 @@ class TradingStrategy:
         # For testing, we hardcode ❌ since the math logic isn't fully returning True/False yet
         c1, c2, c3, c4 = "❌", "❌", "❌", "❌"
         
-        print(f"{symbol} - [{c1} 15m Break | {c2} 1m Break | {c3} ChoCh | {c4} Trendline] (Price: {current_price:.2f})")
+        print(f"{symbol} - [{c1} 5m Break | {c2} 1m Break | {c3} ChoCh | {c4} Trendline] (Price: {current_price:.2f})")
         
         return "HOLD"

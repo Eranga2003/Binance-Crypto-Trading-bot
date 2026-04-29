@@ -15,11 +15,15 @@ class DataFetcher:
             'secret': BINANCE_API_SECRET,
             'enableRateLimit': True,
             'options': {
-                'defaultType': 'future', # Assuming futures for leverage support
+                'defaultType': 'swap', # 'swap' is used for USDT Perpetual Futures in ccxt
             }
         })
         if TESTNET:
             self.exchange.set_sandbox_mode(True)
+            try:
+                self.exchange.load_markets()
+            except Exception as e:
+                print(f"Warning: Could not load markets initially: {e}")
 
     def fetch_ohlcv(self, symbol, timeframe, limit=1000):
         """
