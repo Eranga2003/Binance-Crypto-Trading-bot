@@ -11,67 +11,62 @@ def main():
     strategy = TradingStrategy()
     executor = OrderExecutor(fetcher.exchange)
     
-    symbol = 'BTC/USDT'
+    symbols_to_trade = [
+        'BTC/USDT', 'ETH/USDT', 'BNB/USDT', 'SOL/USDT', 'XRP/USDT', 
+        'ADA/USDT', 'DOGE/USDT', 'AVAX/USDT', 'LINK/USDT', 'MATIC/USDT', 
+        'DOT/USDT', 'LTC/USDT', 'TRX/USDT', 'ATOM/USDT', 'APT/USDT', 
+        'ARB/USDT', 'OP/USDT', 'INJ/USDT', 'SUI/USDT', 'SEI/USDT', 
+        'RUNE/USDT', 'PEPE/USDT', 'FLOKI/USDT', 'BONK/USDT', 'WIF/USDT', 
+        'NEAR/USDT', 'FIL/USDT', 'ICP/USDT', 'ALGO/USDT', 'EGLD/USDT'
+    ]
     
     # Simulated account balance for position sizing
     account_balance = 1000  # USD
     
     while True:
         try:
-            current_time = datetime.datetime.utcnow()
+            current_time = datetime.datetime.now(datetime.UTC)
             
             # 1. Check if we are in valid US market hours
             if not strategy.check_time_filter(current_time):
-                print(f"[{current_time.strftime('%H:%M:%S UTC')}] Outside US Market Hours. Waiting...")
-                time.sleep(60 * 15) # Check again in 15 mins
-                continue
+                pass # Ignoring filter silently for testing
                 
-            print(f"[{current_time.strftime('%H:%M:%S UTC')}] US Market Open. Analyzing {symbol}...")
+            print(f"\n{'='*50}\n[{current_time.strftime('%H:%M:%S UTC')}] 🗽 US Market Open. Starting Analysis Scan...\n{'='*50}")
             
-            # 2. Fetch Data
-            df_1h = fetcher.fetch_ohlcv(symbol, '1h', limit=100)
-            df_25m = fetcher.fetch_25m_ohlcv(symbol, limit=100)
-            df_15m = fetcher.fetch_ohlcv(symbol, '15m', limit=100)
-            
-            if df_1h is None or df_15m is None or df_25m is None:
-                print("Failed to fetch market data. Retrying...")
-                time.sleep(60)
-                continue
-            
-            # 3. Evaluate Strategy
-            signal = strategy.evaluate_market(df_1h, df_25m, df_15m, current_time)
-            
-            if signal in ["BUY", "SELL"]:
-                print(f"*** STRATEGY SIGNAL GENERATED: {signal} ***")
+            for symbol in symbols_to_trade:
+                # 2. Fetch Data (15m Macro, 1m Micro)
+                df_macro = fetcher.fetch_ohlcv(symbol, '15m', limit=100)
+                df_micro = fetcher.fetch_ohlcv(symbol, '1m', limit=100)
                 
-                # 4. Calculate Risk & Position Sizing
-                entry_price = df_15m['close'].iloc[-1]
+                if df_macro is None or df_micro is None:
+                    print(f"[{symbol}] ⚠️ Failed to fetch market data. Skipping...\n")
+                    continue
                 
-                # Example: Calculate Stop Loss based on recent swing low/high
-                # Using a dummy 2% SL for structural demonstration
-                if signal == "BUY":
-                    stop_loss_price = entry_price * 0.98
-                else:
-                    stop_loss_price = entry_price * 1.02
+                # 3. Evaluate Strategy
+                signal = strategy.evaluate_market(symbol, df_macro, df_micro, current_time)
                 
-                pos = calculate_position(account_balance, entry_price, stop_loss_price)
-                
-                if pos:
-                    print(f"Position Sizing Details:\n{pos}")
+                if signal in ["BUY", "SELL"]:
+                    print(f"[{symbol}] *** 🚀 STRATEGY SIGNAL GENERATED: {signal} ***\n")
                     
-                    # 5. Execute Order
-                    side = 'buy' if signal == 'BUY' else 'sell'
-                    print(f"EXECUTING {side.upper()} ORDER for {pos['position_size_crypto']:.4f} {symbol}")
+                    # 4. Calculate Risk & Position Sizing
+                    entry_price = df_micro['close'].iloc[-1]
                     
-                    # Uncomment to place live orders on testnet/mainnet:
-                    # order = executor.place_order(symbol, side, pos['position_size_crypto'], stop_loss=pos['stop_loss_price'], take_profit=pos['take_profit_price'])
-                    # print(f"Order response: {order}")
+                    if signal == "BUY":
+                        stop_loss_price = entry_price * 0.98
+                    else:
+                        stop_loss_price = entry_price * 1.02
                     
-            else:
-                print("No valid trade confirmations found.")
-                
-            # Sleep before checking again (e.g., 5 minutes)
-            time.sleep(60 * 5)
+                    pos = calculate_position(account_balance, entry_price, stop_loss_price)
+                    
+                    if pos:
+                        side = 'buy' if signal == 'BUY' else 'sell'
+                        print(f"[{symbol}] 💰 Position Sizing: Executing {side.upper()} for {pos['position_size_crypto']:.4f}\n")
+                        # order = executor.place_order(symbol, side, pos['position_size_crypto'], stop_loss=pos['stop_loss_price'], take_profit=pos['take_profit_price'])
+                        
+                # No else statement needed here since evaluate_market prints the HOLD status
+                    
+            print(f"\n✅ Scan complete. Sleeping for 1 second...")
+            time.sleep(1)
             
         except Exception as e:
             print(f"Error in main loop: {e}")

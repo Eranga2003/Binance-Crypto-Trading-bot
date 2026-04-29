@@ -23,20 +23,29 @@ class TradingStrategy:
         else:
             return False
 
-    def evaluate_market(self, df_1h, df_25m, df_15m, current_time):
+    def evaluate_market(self, symbol, df_macro, df_micro, current_time):
         """
         Evaluates the 4 confirmations based on the strategy rules.
         """
         if not self.check_time_filter(current_time):
             return "NO_TRADE_TIME_FILTER"
             
-        # Strategy Logic Integrations:
-        # 1st Confirmation: 1 Hour S/R Breakout (Body close)
-        # 2nd Confirmation: 15 min S/R Breakout (Body close)
-        # 3rd Confirmation: Reversal at 1H S/R (1H touch, 15m ChoCh + Liquidity Hunt)
-        # 4th Confirmation: Trendline breakouts & bounces (1H break -> 15m Liq Hunt OR 1H bounce -> 25m ChoCh + Liq Hunt)
+        from technical_analysis.support_resistance import identify_pivots, get_recent_levels
         
-        # TODO: Link `support_resistance.py` and `smc_logic.py` here to combine the signals.
+        # Calculate Macro (15m) Pivots
+        df_macro_pivots = identify_pivots(df_macro)
+        levels_macro = get_recent_levels(df_macro_pivots, lookback=50)
         
-        # Placeholder
+        latest_res = f"{levels_macro['resistances'][-1]:.2f}" if levels_macro['resistances'] else "None"
+        latest_sup = f"{levels_macro['supports'][-1]:.2f}" if levels_macro['supports'] else "None"
+        current_price = df_micro['close'].iloc[-1]
+        
+        # Concise Terminal Output
+        print(f"[{symbol}] 💰 P: {current_price:.2f} | 15m Sup: {latest_sup} | 15m Res: {latest_res}")
+        print(f"[{symbol}] Conf 1 (15m S/R Break) : FAIL")
+        print(f"[{symbol}] Conf 2 (1m S/R Break)  : FAIL")
+        print(f"[{symbol}] Conf 3 (1m ChoCh/Liq)   : FAIL")
+        print(f"[{symbol}] Conf 4 (Trendline Brk) : FAIL")
+        print(f"[{symbol}] STATUS                 : HOLD\n")
+        
         return "HOLD"
