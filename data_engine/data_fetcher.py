@@ -10,20 +10,28 @@ from config import BINANCE_API_KEY, BINANCE_API_SECRET, TESTNET
 
 class DataFetcher:
     def __init__(self):
-        self.exchange = ccxt.binance({
+        # ccxt.binanceusdm is the correct class for Binance USDT-M Perpetual Futures.
+        # ccxt.binance with defaultType='swap' does NOT correctly route the sandbox
+        # URL to testnet.binancefuture.com — binanceusdm does.
+        self.exchange = ccxt.binanceusdm({
             'apiKey': BINANCE_API_KEY,
             'secret': BINANCE_API_SECRET,
             'enableRateLimit': True,
-            'options': {
-                'defaultType': 'swap', # 'swap' is used for USDT Perpetual Futures in ccxt
-            }
         })
+
         if TESTNET:
+            # Routes all requests to https://testnet.binancefuture.com (Binance Demo Trading)
             self.exchange.set_sandbox_mode(True)
-            try:
-                self.exchange.load_markets()
-            except Exception as e:
-                print(f"Warning: Could not load markets initially: {e}")
+            print("[DataFetcher] Demo Trading mode ON — connected to Binance Futures Testnet")
+        else:
+            print("[DataFetcher] LIVE Trading mode ON — connected to Binance Futures LIVE")
+
+        try:
+            self.exchange.load_markets()
+            print("[DataFetcher] Markets loaded successfully.")
+        except Exception as e:
+            print(f"[DataFetcher] Warning: Could not load markets: {e}")
+
 
     def fetch_ohlcv(self, symbol, timeframe, limit=1000):
         """
