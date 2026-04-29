@@ -29,18 +29,56 @@ def identify_pivots(df, window=5):
             
     return df
 
-def get_recent_levels(df, lookback=50):
+def get_strongest_levels(df, current_price, lookback=100, tolerance=0.002):
     """
-    Get the most recent support (pivot low) and resistance (pivot high) levels.
+    Get the most powerful support and resistance levels by checking historical touches.
+    Resistance must be strictly > current_price.
+    Support must be strictly < current_price.
+    Tolerance is the % deviation allowed to count as a 'touch'.
     """
     recent_df = df.tail(lookback)
     
-    resistances = recent_df[recent_df['pivot_high'] == True]['high'].tolist()
-    supports = recent_df[recent_df['pivot_low'] == True]['low'].tolist()
+    # Extract all pivot highs and lows in the lookback window
+    all_resistances = recent_df[recent_df['pivot_high'] == True]['high'].tolist()
+    all_supports = recent_df[recent_df['pivot_low'] == True]['low'].tolist()
     
+    # Filter strictly above/below current price
+    valid_resistances = [r for r in all_resistances if r > current_price]
+    valid_supports = [s for s in all_supports if s < current_price]
+    
+    best_res = None
+    best_res_score = -1
+    
+    for r in valid_resistances:
+        # Count touches (how many candles' highs came within the tolerance band)
+        lower_bound = r * (1 - tolerance)
+        upper_bound = r * (1 + tolerance)
+        touches = len(recent_df[(recent_df['high'] >= lower_bound) & (recent_df['high'] <= upper_bound)])
+        
+        # Prefer the one with more touches. If equal, prefer the one closer to current price (smaller R)
+        if touches > best_res_score or (touches == best_res_score and (best_res is None or r < best_res)):
+            best_res_score = touches
+            best_res = r
+            
+    best_sup = None
+    best_sup_score = -1
+    
+    for s in valid_supports:
+        # Count touches (how many candles' lows came within the tolerance band)
+        lower_bound = s * (1 - tolerance)
+        upper_bound = s * (1 + tolerance)
+        touches = len(recent_df[(recent_df['low'] >= lower_bound) & (recent_df['low'] <= upper_bound)])
+        
+        # Prefer the one with more touches. If equal, prefer the one closer to current price (larger S)
+        if touches > best_sup_score or (touches == best_sup_score and (best_sup is None or s > best_sup)):
+            best_sup_score = touches
+            best_sup = s
+            
     return {
-        'resistances': resistances,
-        'supports': supports
+        'resistance': best_res,
+        'support': best_sup,
+        'res_touches': best_res_score,
+        'sup_touches': best_sup_score
     }
 
 def detect_body_breakout(df, index, level, is_resistance):

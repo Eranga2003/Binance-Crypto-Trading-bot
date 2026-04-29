@@ -28,15 +28,16 @@ class TradingStrategy:
         Evaluates the 4 confirmations based on the strategy rules.
         """
         # Time filter is handled in main.py, so we proceed with evaluation here
-        from technical_analysis.support_resistance import identify_pivots, get_recent_levels
+        from technical_analysis.support_resistance import identify_pivots, get_strongest_levels
+        
+        current_price = df_micro['close'].iloc[-1]
         
         # Calculate Macro (5m) Pivots
         df_macro_pivots = identify_pivots(df_macro)
-        levels_macro = get_recent_levels(df_macro_pivots, lookback=50)
+        levels_macro = get_strongest_levels(df_macro_pivots, current_price, lookback=100, tolerance=0.002)
         
-        latest_res = f"{levels_macro['resistances'][-1]:.2f}" if levels_macro['resistances'] else "None"
-        latest_sup = f"{levels_macro['supports'][-1]:.2f}" if levels_macro['supports'] else "None"
-        current_price = df_micro['close'].iloc[-1]
+        latest_res = f"{levels_macro['resistance']:.2f}" if levels_macro['resistance'] else "None"
+        latest_sup = f"{levels_macro['support']:.2f}" if levels_macro['support'] else "None"
         
         # For testing, we hardcode ❌ since the math logic isn't fully returning True/False yet
         c1, c2, c3, c4 = "❌", "❌", "❌", "❌"
