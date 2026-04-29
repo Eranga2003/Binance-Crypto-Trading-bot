@@ -109,9 +109,10 @@ def main():
     strategy = TradingStrategy()
     executor = OrderExecutor(fetcher.exchange)
 
+    # ccxt.binanceusdm requires 'BASE/USDT:USDT' format for USDT-M perpetual futures
     symbols_to_trade = [
-        'BTC/USDT', 'ETH/USDT', 'BNB/USDT', 'SOL/USDT', 'XRP/USDT',
-        'ADA/USDT', 'DOGE/USDT'
+        'BTC/USDT:USDT', 'ETH/USDT:USDT', 'BNB/USDT:USDT', 'SOL/USDT:USDT',
+        'XRP/USDT:USDT', 'ADA/USDT:USDT', 'DOGE/USDT:USDT'
     ]
 
     # Simulated account balance for position sizing
