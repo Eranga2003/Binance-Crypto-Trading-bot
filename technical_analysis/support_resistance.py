@@ -182,48 +182,36 @@ def get_trendlines(df, window=5, lookback=60):
             'sup_trendline': {'slope': float, 'intercept': float, 'current_value': float} | None,
         }
     """
-    df_pivots = identify_pivots(df.tail(lookback), window=window)
+    # Reset to clean 0-based positional index so all lookups are consistent
+    df_pivots = identify_pivots(df.tail(lookback), window=window).reset_index(drop=True)
     n = len(df_pivots)
 
     # --- Descending Resistance Trendline (connecting pivot HIGHS) ---
-    pivot_highs = df_pivots[df_pivots['pivot_high'] == True].copy()
-    pivot_highs = pivot_highs.reset_index(drop=True)
+    # Get positional indices (0-based) of all pivot highs
+    pivot_high_positions = df_pivots.index[df_pivots['pivot_high'] == True].tolist()
 
     res_tl = None
-    if len(pivot_highs) >= 2:
-        # Use the last two pivot highs
-        p1 = pivot_highs.iloc[-2]
-        p2 = pivot_highs.iloc[-1]
-        idx1 = df_pivots.index.get_loc(p1.name) if hasattr(p1, 'name') else len(pivot_highs) - 2
-        idx2 = df_pivots.index.get_loc(p2.name) if hasattr(p2, 'name') else len(pivot_highs) - 1
-
-        # Recalculate positional indices after reset
-        ph_indices = list(pivot_highs.index)
-        idx1, idx2 = ph_indices[-2], ph_indices[-1]
-
-        slope = (p2['high'] - p1['high']) / (idx2 - idx1) if idx2 != idx1 else 0
-        intercept = p1['high'] - slope * idx1
-        current_value = slope * (n - 1) + intercept
-
-        res_tl = {'slope': slope, 'intercept': intercept, 'current_value': current_value}
+    if len(pivot_high_positions) >= 2:
+        idx1, idx2 = pivot_high_positions[-2], pivot_high_positions[-1]
+        price1 = df_pivots['high'].iloc[idx1]
+        price2 = df_pivots['high'].iloc[idx2]
+        slope       = (price2 - price1) / (idx2 - idx1) if idx2 != idx1 else 0
+        intercept   = price1 - slope * idx1
+        current_val = slope * (n - 1) + intercept
+        res_tl = {'slope': slope, 'intercept': intercept, 'current_value': current_val}
 
     # --- Ascending Support Trendline (connecting pivot LOWS) ---
-    pivot_lows = df_pivots[df_pivots['pivot_low'] == True].copy()
-    pivot_lows = pivot_lows.reset_index(drop=True)
+    pivot_low_positions = df_pivots.index[df_pivots['pivot_low'] == True].tolist()
 
     sup_tl = None
-    if len(pivot_lows) >= 2:
-        p1 = pivot_lows.iloc[-2]
-        p2 = pivot_lows.iloc[-1]
-
-        pl_indices = list(pivot_lows.index)
-        idx1, idx2 = pl_indices[-2], pl_indices[-1]
-
-        slope = (p2['low'] - p1['low']) / (idx2 - idx1) if idx2 != idx1 else 0
-        intercept = p1['low'] - slope * idx1
-        current_value = slope * (n - 1) + intercept
-
-        sup_tl = {'slope': slope, 'intercept': intercept, 'current_value': current_value}
+    if len(pivot_low_positions) >= 2:
+        idx1, idx2 = pivot_low_positions[-2], pivot_low_positions[-1]
+        price1 = df_pivots['low'].iloc[idx1]
+        price2 = df_pivots['low'].iloc[idx2]
+        slope       = (price2 - price1) / (idx2 - idx1) if idx2 != idx1 else 0
+        intercept   = price1 - slope * idx1
+        current_val = slope * (n - 1) + intercept
+        sup_tl = {'slope': slope, 'intercept': intercept, 'current_value': current_val}
 
     return {'res_trendline': res_tl, 'sup_trendline': sup_tl}
 
