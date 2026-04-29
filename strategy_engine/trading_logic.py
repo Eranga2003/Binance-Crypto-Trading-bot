@@ -40,12 +40,9 @@ class TradingStrategy:
         latest_sup = f"{levels_macro['supports'][-1]:.2f}" if levels_macro['supports'] else "None"
         current_price = df_micro['close'].iloc[-1]
         
-        # Concise Terminal Output
-        print(f"[{symbol}] 💰 P: {current_price:.2f} | 15m Sup: {latest_sup} | 15m Res: {latest_res}")
-        print(f"[{symbol}] Conf 1 (15m S/R Break) : FAIL")
-        print(f"[{symbol}] Conf 2 (1m S/R Break)  : FAIL")
-        print(f"[{symbol}] Conf 3 (1m ChoCh/Liq)   : FAIL")
-        print(f"[{symbol}] Conf 4 (Trendline Brk) : FAIL")
-        print(f"[{symbol}] STATUS                 : HOLD\n")
+        # For testing, we hardcode ❌ since the math logic isn't fully returning True/False yet
+        c1, c2, c3, c4 = "❌", "❌", "❌", "❌"
+        
+        print(f"{symbol} - [{c1} 15m Break | {c2} 1m Break | {c3} ChoCh | {c4} Trendline] (Price: {current_price:.2f})")
         
         return "HOLD"

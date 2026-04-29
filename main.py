@@ -13,11 +13,7 @@ def main():
     
     symbols_to_trade = [
         'BTC/USDT', 'ETH/USDT', 'BNB/USDT', 'SOL/USDT', 'XRP/USDT', 
-        'ADA/USDT', 'DOGE/USDT', 'AVAX/USDT', 'LINK/USDT', 'MATIC/USDT', 
-        'DOT/USDT', 'LTC/USDT', 'TRX/USDT', 'ATOM/USDT', 'APT/USDT', 
-        'ARB/USDT', 'OP/USDT', 'INJ/USDT', 'SUI/USDT', 'SEI/USDT', 
-        'RUNE/USDT', 'PEPE/USDT', 'FLOKI/USDT', 'BONK/USDT', 'WIF/USDT', 
-        'NEAR/USDT', 'FIL/USDT', 'ICP/USDT', 'ALGO/USDT', 'EGLD/USDT'
+        'ADA/USDT', 'DOGE/USDT'
     ]
     
     # Simulated account balance for position sizing
