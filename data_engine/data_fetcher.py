@@ -10,27 +10,26 @@ from config import BINANCE_API_KEY, BINANCE_API_SECRET, TESTNET
 
 class DataFetcher:
     def __init__(self):
-        # ccxt.binanceusdm is the correct class for Binance USDT-M Perpetual Futures.
-        # ccxt.binance with defaultType='swap' does NOT correctly route the sandbox
-        # URL to testnet.binancefuture.com — binanceusdm does.
+        # Binance deprecated the old futures testnet (sandbox).
+        # New Binance Demo Trading uses LIVE API endpoints with demo account API keys.
+        # Do NOT call set_sandbox_mode(True) — that pointed to the old deprecated testnet.
+        # Simply use your Binance Demo Trading API key/secret with the live endpoint.
         self.exchange = ccxt.binanceusdm({
             'apiKey': BINANCE_API_KEY,
             'secret': BINANCE_API_SECRET,
             'enableRateLimit': True,
         })
 
-        if TESTNET:
-            # Routes all requests to https://testnet.binancefuture.com (Binance Demo Trading)
-            self.exchange.set_sandbox_mode(True)
-            print("[DataFetcher] Demo Trading mode ON — connected to Binance Futures Testnet")
-        else:
-            print("[DataFetcher] LIVE Trading mode ON — connected to Binance Futures LIVE")
+        mode = 'DEMO Trading' if TESTNET else 'LIVE Trading'
+        print(f"[DataFetcher] Mode: {mode} — using Binance USDT-M Futures (live endpoint)")
+        print(f"[DataFetcher] NOTE: Ensure your API keys are from Binance Demo Trading account")
 
         try:
             self.exchange.load_markets()
             print("[DataFetcher] Markets loaded successfully.")
         except Exception as e:
             print(f"[DataFetcher] Warning: Could not load markets: {e}")
+
 
 
     def fetch_ohlcv(self, symbol, timeframe, limit=1000):
