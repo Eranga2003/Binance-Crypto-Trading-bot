@@ -6,7 +6,7 @@ load_dotenv()
 # Binance API Configuration
 BINANCE_API_KEY = os.getenv("BINANCE_API_KEY", "")
 BINANCE_API_SECRET = os.getenv("BINANCE_API_SECRET", "")
-TESTNET = True # Set to False for live trading
+TESTNET = False # Set to True for Binance Testnet (sandbox), False for LIVE trading
 
 # Strategy Parameters
 RISK_PERCENT_PER_TRADE = 0.03

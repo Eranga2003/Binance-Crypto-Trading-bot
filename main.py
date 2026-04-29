@@ -56,8 +56,18 @@ def main():
                     
                     if pos:
                         side = 'buy' if signal == 'BUY' else 'sell'
-                        print(f"[{symbol}] 💰 Position Sizing: Executing {side.upper()} for {pos['position_size_crypto']:.4f}\n")
-                        # order = executor.place_order(symbol, side, pos['position_size_crypto'], stop_loss=pos['stop_loss_price'], take_profit=pos['take_profit_price'])
+                        print(f"[{symbol}] Sending {side.upper()} order | Size: {pos['position_size_crypto']:.4f} | SL: {pos['stop_loss_price']:.4f} | TP: {pos['take_profit_price']:.4f}")
+                        order = executor.place_order(
+                            symbol,
+                            side,
+                            pos['position_size_crypto'],
+                            stop_loss=pos['stop_loss_price'],
+                            take_profit=pos['take_profit_price']
+                        )
+                        if order:
+                            print(f"[{symbol}] ORDER PLACED: ID={order.get('id')} Status={order.get('status')}")
+                        else:
+                            print(f"[{symbol}] ORDER FAILED — check execution_engine logs above")
                         
                 # No else statement needed here since evaluate_market prints the HOLD status
                     
