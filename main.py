@@ -4,6 +4,7 @@ from data_engine.data_fetcher import DataFetcher
 from strategy_engine.trading_logic import TradingStrategy
 from risk_manager.position_sizing import calculate_position
 from execution_engine.orders import OrderExecutor
+from config import EXCHANGE
 
 # ─────────────────────────────────────────────────────────────────────────────
 #  POSITION TRACKER
@@ -24,7 +25,7 @@ def _print_order_banner(symbol, side, entry, sl, tp, order_id, size):
     rr         = tp_dist / sl_dist if sl_dist else 0
     print(f"""
 ╔══════════════════════════════════════════════════════╗
-  ORDER PLACED ON BINANCE — {symbol}
+  ORDER PLACED — {symbol}
   {side_emoji}  |  Size: {size:.4f}  |  ID: {order_id}
   ──────────────────────────────────────────────────
   Entry  : {entry:.4f}
@@ -104,19 +105,22 @@ def _monitor_positions(open_positions, current_prices):
 # ─────────────────────────────────────────────────────────────────────────────
 
 def main():
-    print("Starting Binance Price Action & SMC Trading Bot...")
+    print(f"Starting {EXCHANGE.capitalize()} Price Action & SMC Trading Bot...")
     fetcher  = DataFetcher()
     strategy = TradingStrategy()
     executor = OrderExecutor(fetcher.exchange)
 
-    # ccxt.binanceusdm requires 'BASE/USDT:USDT' format for USDT-M perpetual futures
-    symbols_to_trade = [
-        'BTC/USDT:USDT', 'ETH/USDT:USDT', 'BNB/USDT:USDT', 'SOL/USDT:USDT',
-        'XRP/USDT:USDT', 'ADA/USDT:USDT', 'DOGE/USDT:USDT'
-    ]
+    base_symbols = ['BTC/USDT', 'ETH/USDT', 'BNB/USDT', 'SOL/USDT', 'XRP/USDT', 'ADA/USDT', 'DOGE/USDT']
+    if EXCHANGE in ('binance', 'binanceusdm'):
+        symbols_to_trade = [f"{symbol}:USDT" for symbol in base_symbols]
+    else:
+        symbols_to_trade = base_symbols
 
-    # Simulated account balance for position sizing
-    account_balance = 1000  # USD
+    # Fetch REAL account balance from exchange
+    account_balance = fetcher.get_account_balance()
+    if account_balance <= 0:
+        print("[ERROR] Account has no USDT balance. Cannot trade. Exiting.")
+        return
 
     # Tracks all open positions: { symbol: { side, entry, tp, sl, size, order_id } }
     open_positions = {}
@@ -165,43 +169,55 @@ def main():
 
                     pos = calculate_position(account_balance, entry_price, stop_loss_price)
 
-                    if pos:
-                        side = 'buy' if signal == 'BUY' else 'sell'
+                    if not pos:
+                        print(f"[{symbol}] ❌ Position calculation failed - account balance may be too low")
+                        print(f"[{symbol}] Required: minimum $5 USDT for Bybit | Available: {account_balance:.2f} USDT")
+                        continue
+                    
+                    # Check if position size is reasonable
+                    position_value_usd = pos['position_size_crypto'] * entry_price
+                    if position_value_usd > account_balance * 0.25:
+                        print(f"[{symbol}] WARNING: Position size ({position_value_usd:.2f} USDT) "
+                              f"exceeds 25% of balance ({account_balance:.2f} USDT)")
+                        print(f"[{symbol}] Skipping order to avoid liquidation risk")
+                        continue
 
-                        # 5. Send order to Binance
-                        order = executor.place_order(
-                            symbol,
-                            side,
-                            pos['position_size_crypto'],
-                            stop_loss=pos['stop_loss_price'],
-                            take_profit=pos['take_profit_price']
+                    side = 'buy' if signal == 'BUY' else 'sell'
+
+                    # 5. Send order to Bybit
+                    order = executor.place_order(
+                        symbol,
+                        side,
+                        pos['position_size_crypto'],
+                        stop_loss=pos['stop_loss_price'],
+                        take_profit=pos['take_profit_price']
+                    )
+
+                    if order:
+                        order_id = order.get('id', 'N/A')
+
+                        # 6. Print rich order banner
+                        _print_order_banner(
+                            symbol   = symbol,
+                            side     = side,
+                            entry    = entry_price,
+                            sl       = pos['stop_loss_price'],
+                            tp       = pos['take_profit_price'],
+                            order_id = order_id,
+                            size     = pos['position_size_crypto'],
                         )
 
-                        if order:
-                            order_id = order.get('id', 'N/A')
-
-                            # 6. Print rich order banner
-                            _print_order_banner(
-                                symbol   = symbol,
-                                side     = side,
-                                entry    = entry_price,
-                                sl       = pos['stop_loss_price'],
-                                tp       = pos['take_profit_price'],
-                                order_id = order_id,
-                                size     = pos['position_size_crypto'],
-                            )
-
-                            # 7. Track position for monitoring
-                            open_positions[symbol] = {
-                                'side':     side,
-                                'entry':    entry_price,
-                                'tp':       pos['take_profit_price'],
-                                'sl':       pos['stop_loss_price'],
-                                'size':     pos['position_size_crypto'],
-                                'order_id': order_id,
-                            }
-                        else:
-                            print(f"[{symbol}] ORDER FAILED — check execution_engine logs above")
+                        # 7. Track position for monitoring
+                        open_positions[symbol] = {
+                            'side':     side,
+                            'entry':    entry_price,
+                            'tp':       pos['take_profit_price'],
+                            'sl':       pos['stop_loss_price'],
+                            'size':     pos['position_size_crypto'],
+                            'order_id': order_id,
+                        }
+                    else:
+                        print(f"[{symbol}] ORDER FAILED — check execution_engine logs above")
 
             # ── Monitor open positions ───────────────────────────────────
             hits = _monitor_positions(open_positions, current_prices)

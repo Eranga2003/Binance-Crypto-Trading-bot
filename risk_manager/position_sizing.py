@@ -5,7 +5,11 @@ def calculate_position(account_balance, entry_price, stop_loss_price):
     - 3% risk on that allocation
     - 5x Leverage
     - 3% Take Profit
+    - Minimum order value: $5 USD (Bybit requirement)
     """
+    # Bybit minimum order value (in USD)
+    BYBIT_MIN_ORDER_VALUE = 5.0
+    
     allocation = account_balance * 0.05
     leverage = 5
     
@@ -24,6 +28,16 @@ def calculate_position(account_balance, entry_price, stop_loss_price):
     max_leveraged_position = allocation * leverage
     
     final_position_usd = min(position_size_usd, max_leveraged_position)
+    
+    # ENFORCE MINIMUM ORDER VALUE
+    if final_position_usd < BYBIT_MIN_ORDER_VALUE:
+        # Scale up to meet minimum, but cap at available balance
+        if account_balance >= BYBIT_MIN_ORDER_VALUE:
+            final_position_usd = min(BYBIT_MIN_ORDER_VALUE, account_balance * 0.5)  # Max 50% of balance
+        else:
+            print(f"[Position Sizing] ERROR: Account balance ({account_balance:.2f} USDT) is below Bybit minimum ({BYBIT_MIN_ORDER_VALUE} USDT)")
+            return None
+    
     position_size_crypto = final_position_usd / entry_price
     
     # Calculate TP (3% from entry)
@@ -33,6 +47,8 @@ def calculate_position(account_balance, entry_price, stop_loss_price):
     else: 
         # SHORT Position
         take_profit_price = entry_price * (1 - 0.03)
+    
+    print(f"[Position Sizing] Balance: {account_balance:.2f} USDT | Position: {final_position_usd:.2f} USDT | Crypto: {position_size_crypto:.8f}")
         
     return {
         'allocated_usd': allocation,

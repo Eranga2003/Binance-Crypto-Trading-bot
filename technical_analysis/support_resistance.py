@@ -9,6 +9,7 @@ def identify_pivots(df, window=5):
     """
     Identifies pivot highs and pivot lows in a dataframe.
     Window specifies how many candles to the left and right must be lower/higher.
+    Changed from <= to < to allow equal values (less restrictive for smooth markets).
     """
     df = df.copy()
     df['pivot_high'] = False
@@ -19,9 +20,10 @@ def identify_pivots(df, window=5):
         is_pivot_low = True
 
         for j in range(1, window + 1):
-            if df['high'].iloc[i] <= df['high'].iloc[i - j] or df['high'].iloc[i] <= df['high'].iloc[i + j]:
+            # Changed <= to < for less restrictive pivot detection
+            if df['high'].iloc[i] < df['high'].iloc[i - j] or df['high'].iloc[i] < df['high'].iloc[i + j]:
                 is_pivot_high = False
-            if df['low'].iloc[i] >= df['low'].iloc[i - j] or df['low'].iloc[i] >= df['low'].iloc[i + j]:
+            if df['low'].iloc[i] > df['low'].iloc[i - j] or df['low'].iloc[i] > df['low'].iloc[i + j]:
                 is_pivot_low = False
 
         if is_pivot_high:
@@ -42,11 +44,28 @@ def get_strongest_levels(df, current_price, lookback=100, tolerance=0.002):
     Resistance must be strictly > current_price.
     Support must be strictly < current_price.
     Tolerance is the % deviation allowed to count as a 'touch'.
+    
+    FALLBACK: If no pivots found, uses recent swing highs/lows.
     """
     recent_df = df.tail(lookback)
 
     all_resistances = recent_df[recent_df['pivot_high'] == True]['high'].tolist()
     all_supports    = recent_df[recent_df['pivot_low']  == True]['low'].tolist()
+
+    # FALLBACK: If no pivots detected, get recent local extremes
+    if not all_resistances or len(all_resistances) < 2:
+        # Find recent swing highs (local peaks in 5-candle windows)
+        for i in range(5, len(recent_df) - 5):
+            window_high = recent_df['high'].iloc[i-5:i+5].max()
+            if recent_df['high'].iloc[i] >= window_high * 0.999:  # Within 0.1% of local max
+                all_resistances.append(recent_df['high'].iloc[i])
+    
+    if not all_supports or len(all_supports) < 2:
+        # Find recent swing lows (local valleys in 5-candle windows)
+        for i in range(5, len(recent_df) - 5):
+            window_low = recent_df['low'].iloc[i-5:i+5].min()
+            if recent_df['low'].iloc[i] <= window_low * 1.001:  # Within 0.1% of local min
+                all_supports.append(recent_df['low'].iloc[i])
 
     valid_resistances = [r for r in all_resistances if r > current_price]
     valid_supports    = [s for s in all_supports    if s < current_price]
@@ -181,6 +200,8 @@ def get_trendlines(df, window=5, lookback=60):
             'res_trendline': {'slope': float, 'intercept': float, 'current_value': float} | None,
             'sup_trendline': {'slope': float, 'intercept': float, 'current_value': float} | None,
         }
+    
+    FALLBACK: If not enough pivots, uses recent swing extremes.
     """
     # Reset to clean 0-based positional index so all lookups are consistent
     df_pivots = identify_pivots(df.tail(lookback), window=window).reset_index(drop=True)
@@ -189,6 +210,14 @@ def get_trendlines(df, window=5, lookback=60):
     # --- Descending Resistance Trendline (connecting pivot HIGHS) ---
     # Get positional indices (0-based) of all pivot highs
     pivot_high_positions = df_pivots.index[df_pivots['pivot_high'] == True].tolist()
+
+    # FALLBACK: If not enough pivot highs, find recent swing highs
+    if len(pivot_high_positions) < 2:
+        for i in range(5, len(df_pivots) - 5):
+            window_high = df_pivots['high'].iloc[max(0, i-5):i+5].max()
+            if df_pivots['high'].iloc[i] >= window_high * 0.99:
+                pivot_high_positions.append(i)
+        pivot_high_positions = sorted(list(set(pivot_high_positions)))[-2:]  # Keep last 2
 
     res_tl = None
     if len(pivot_high_positions) >= 2:
@@ -202,6 +231,14 @@ def get_trendlines(df, window=5, lookback=60):
 
     # --- Ascending Support Trendline (connecting pivot LOWS) ---
     pivot_low_positions = df_pivots.index[df_pivots['pivot_low'] == True].tolist()
+
+    # FALLBACK: If not enough pivot lows, find recent swing lows
+    if len(pivot_low_positions) < 2:
+        for i in range(5, len(df_pivots) - 5):
+            window_low = df_pivots['low'].iloc[max(0, i-5):i+5].min()
+            if df_pivots['low'].iloc[i] <= window_low * 1.01:
+                pivot_low_positions.append(i)
+        pivot_low_positions = sorted(list(set(pivot_low_positions)))[-2:]  # Keep last 2
 
     sup_tl = None
     if len(pivot_low_positions) >= 2:

@@ -91,6 +91,93 @@ class TradingStrategy:
             return True
         return False
 
+    def _price_distance_pct(self, price, level):
+        if price is None or level is None or level == 0:
+            return None
+        return abs(price - level) / level * 100
+
+    def _entry_progress_for_state(self, state, price, level):
+        base_scores = {
+            IDLE: 0,
+            TOUCHED: 50,
+            BROKEN: 60,
+            LIQ_HUNT: 80,
+            CHOCH: 70,
+        }
+        score = base_scores.get(state, 0)
+        dist = self._price_distance_pct(price, level)
+        if dist is None:
+            return score
+        
+        # Increased thresholds for realistic market movement (even 0.01% is too small)
+        # Now shows progress even for distant prices - proportional scaling
+        if dist <= 0.01:  # Very close: within 0.01%
+            score += 25
+        elif dist <= 0.05:  # Close: within 0.05%
+            score += 20
+        elif dist <= 0.1:  # Medium: within 0.1%
+            score += 15
+        elif dist <= 0.5:  # Moderate: within 0.5%
+            score += 10
+        elif dist <= 1.0:  # Reasonable: within 1%
+            score += 5
+        else:
+            # For prices further away, show proportional progress
+            # This ensures even distant prices show SOME entry progress
+            score += max(1, int(5 * (100 / dist) / 100))  # 1-5 points based on distance
+        
+        return min(100, score)
+
+    def _choose_nearest_level(self, current_price, res, sup):
+        if res is None and sup is None:
+            return None
+        if res is None:
+            return sup
+        if sup is None:
+            return res
+        return res if abs(current_price - res) < abs(current_price - sup) else sup
+
+    def _get_sr_entry_progress(self, symbol, current_price, prev_price, res, sup):
+        st = self._get_sr_state(symbol)
+        if st['state'] == IDLE:
+            level = self._choose_nearest_level(current_price, res, sup)
+        else:
+            level = st['level']
+        # Return actual distance percentage, not score
+        current_dist = self._price_distance_pct(current_price, level) if level else 0
+        prev_dist = self._price_distance_pct(prev_price, level) if level else 0
+        return (
+            current_dist if current_dist is not None else 0,
+            prev_dist if prev_dist is not None else 0,
+            level,
+        )
+
+    def _choose_nearest_trendline(self, current_price, trendlines):
+        candidates = []
+        if trendlines.get('res_trendline'):
+            candidates.append(trendlines['res_trendline']['current_value'])
+        if trendlines.get('sup_trendline'):
+            candidates.append(trendlines['sup_trendline']['current_value'])
+        if not candidates:
+            return None
+        return min(candidates, key=lambda lvl: abs(current_price - lvl))
+
+    def _get_tl_entry_progress(self, symbol, current_price, prev_price, trendlines):
+        st = self._get_tl_state(symbol)
+        if st['state'] == IDLE:
+            level = self._choose_nearest_trendline(current_price, trendlines)
+        else:
+            tl = st['trendline']
+            level = tl['current_value'] if tl else self._choose_nearest_trendline(current_price, trendlines)
+        # Return actual distance percentage, not score
+        current_dist = self._price_distance_pct(current_price, level) if level else 0
+        prev_dist = self._price_distance_pct(prev_price, level) if level else 0
+        return (
+            current_dist if current_dist is not None else 0,
+            prev_dist if prev_dist is not None else 0,
+            level,
+        )
+
     # ── S/R State Machine ────────────────────────────────────────────────────
 
     def _drive_sr_state(self, symbol, df_5m, current_price, res, sup):
@@ -235,6 +322,7 @@ class TradingStrategy:
         )
 
         current_price = df_macro['close'].iloc[-1]
+        prev_price = df_micro['close'].iloc[-2] if len(df_micro) > 1 else current_price
 
         # ── Identify pivots and key levels on the 5m chart ──────────────────
         df_pivots = identify_pivots(df_macro)
@@ -243,6 +331,12 @@ class TradingStrategy:
 
         res = levels['resistance']
         sup = levels['support']
+        
+        # DEBUG: Show detection status
+        pivot_highs = len(df_pivots[df_pivots['pivot_high'] == True])
+        pivot_lows = len(df_pivots[df_pivots['pivot_low'] == True])
+        if pivot_highs == 0 or pivot_lows == 0 or res is None or sup is None:
+            print(f"   [DEBUG] Pivots: {pivot_highs} highs, {pivot_lows} lows | Levels: Res={res}, Sup={sup} | TL: Res={trendlines['res_trendline'] is not None}, Sup={trendlines['sup_trendline'] is not None}")
 
         res_str = f"{res:.4f}" if res else "None"
         sup_str = f"{sup:.4f}" if sup else "None"
@@ -253,6 +347,9 @@ class TradingStrategy:
         # ── Run both state machines ──────────────────────────────────────────
         sr_signal = self._drive_sr_state(symbol, df_macro, current_price, res, sup)
         tl_signal = self._drive_tl_state(symbol, df_macro, current_price, trendlines)
+
+        sr_pct, sr_pct_prev, sr_level = self._get_sr_entry_progress(symbol, current_price, prev_price, res, sup)
+        tl_pct, tl_pct_prev, tl_level = self._get_tl_entry_progress(symbol, current_price, prev_price, trendlines)
 
         # ── Prioritise an active signal (S/R first, then TL) ────────────────
         final_signal = sr_signal if sr_signal != 'HOLD' else tl_signal
@@ -275,6 +372,11 @@ class TradingStrategy:
         # ── Print to terminal ────────────────────────────────────────────────
         print(f"\n{symbol} — [Price: {current_price:.4f} | Res: {res_str} | Sup: {sup_str} "
               f"| Res TL: {res_tl_val} | Sup TL: {sup_tl_val}]")
+        print(f"   [Entry Proximity] S/R: {sr_pct:.3f}% away (1m ago {sr_pct_prev:.3f}%) | TL: {tl_pct:.3f}% away (1m ago {tl_pct_prev:.3f}%)")
+        if sr_level is not None:
+            print(f"   [S/R Level] {sr_level:.4f}")
+        if tl_level is not None:
+            print(f"   [TL Level] {tl_level:.4f}")
         print(f"   [S/R]  {sr_status_line}")
         print(f"   [TL]   {tl_status_line}")
 

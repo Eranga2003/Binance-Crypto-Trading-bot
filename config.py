@@ -3,10 +3,19 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# Binance API Configuration
-BINANCE_API_KEY = os.getenv("BINANCE_API_KEY", "")
-BINANCE_API_SECRET = os.getenv("BINANCE_API_SECRET", "")
-TESTNET = True  # True = Binance Futures Demo/Testnet | False = LIVE real money
+# Exchange configuration
+EXCHANGE = os.getenv("EXCHANGE", "bybit").strip().lower()
+API_KEY = (
+    os.getenv("API_KEY", "") or
+    os.getenv("BYBIT_API_KEY", "") or
+    os.getenv("BINANCE_API_KEY", "")
+)
+API_SECRET = (
+    os.getenv("API_SECRET", "") or
+    os.getenv("BYBIT_API_SECRET", "") or
+    os.getenv("BINANCE_API_SECRET", "")
+)
+TESTNET = os.getenv("TESTNET", "True").strip().lower() in ("1", "true", "yes", "on")
 
 # Strategy Parameters
 RISK_PERCENT_PER_TRADE = 0.03

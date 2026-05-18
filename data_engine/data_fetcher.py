@@ -6,41 +6,101 @@ import sys
 
 # Add parent directory to path to import config
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from config import BINANCE_API_KEY, BINANCE_API_SECRET, TESTNET
+from config import EXCHANGE, API_KEY, API_SECRET, TESTNET
 
 class DataFetcher:
     def __init__(self):
-        # Binance deprecated the old futures testnet (sandbox).
-        # New Binance Demo Trading uses LIVE API endpoints with demo account API keys.
-        # Do NOT call set_sandbox_mode(True) — that pointed to the old deprecated testnet.
-        # Simply use your Binance Demo Trading API key/secret with the live endpoint.
-        self.exchange = ccxt.binanceusdm({
-            'apiKey': BINANCE_API_KEY,
-            'secret': BINANCE_API_SECRET,
-            'enableRateLimit': True,
-        })
+        # Validate API credentials
+        if not API_KEY or not API_SECRET:
+            print("[DataFetcher] ERROR: API credentials not found!")
+            print("[DataFetcher] Please ensure .env file has:")
+            print("  EXCHANGE=bybit")
+            print("  API_KEY=your_key_without_quotes")
+            print("  API_SECRET=your_secret_without_quotes")
+            raise ValueError("Missing API credentials")
+
+        # Check for common mistakes (quotes in keys)
+        if API_KEY.startswith('"') or API_KEY.startswith("'") or API_SECRET.startswith('"') or API_SECRET.startswith("'"):
+            print("[DataFetcher] ERROR: API credentials have quotes around them!")
+            print("[DataFetcher] Remove quotes from .env file. Use: API_KEY=value (no quotes)")
+            raise ValueError("API credentials contain quotes - check .env file format")
+
+        if EXCHANGE == 'bybit':
+            self.exchange = ccxt.bybit({
+                'apiKey': API_KEY,
+                'secret': API_SECRET,
+                'enableRateLimit': True,
+                'options': {
+                    'defaultType': 'swap',
+                },
+            })
+            if TESTNET:
+                self.exchange.set_sandbox_mode(True)
+            exchange_name = 'Bybit'
+            symbol_note = 'BASE/USDT'
+        elif EXCHANGE in ('binance', 'binanceusdm'):
+            self.exchange = ccxt.binanceusdm({
+                'apiKey': API_KEY,
+                'secret': API_SECRET,
+                'enableRateLimit': True,
+            })
+            exchange_name = 'Binance USDT-M Futures'
+            symbol_note = 'BASE/USDT:USDT'
+        else:
+            raise ValueError(f"Unsupported exchange: {EXCHANGE}")
 
         mode = 'DEMO Trading' if TESTNET else 'LIVE Trading'
-        print(f"[DataFetcher] Mode: {mode} — using Binance USDT-M Futures (live endpoint)")
-        print(f"[DataFetcher] NOTE: Ensure your API keys are from Binance Demo Trading account")
+        print(f"[DataFetcher] Mode: {mode} — using {exchange_name}")
+        print(f"[DataFetcher] API Key configured: {API_KEY[:10]}...{API_KEY[-4:]}")
+        print(f"[DataFetcher] NOTE: Ensure your API keys are from the {exchange_name} account")
+        print(f"[DataFetcher] Symbol format for this exchange: {symbol_note}")
 
         try:
             self.exchange.load_markets()
             print("[DataFetcher] Markets loaded successfully.")
+        except ccxt.AuthenticationError as e:
+            print(f"[DataFetcher] WARNING: Authentication issue during market load: {e}")
+            print("[DataFetcher] This is normal if API permissions are not fully enabled.")
+            print("[DataFetcher] Continuing anyway - OHLCV fetch will still work...")
         except Exception as e:
             print(f"[DataFetcher] Warning: Could not load markets: {e}")
+
+    def get_account_balance(self):
+        """
+        Fetch real account balance from exchange.
+        Returns the USDT balance available for trading.
+        """
+        try:
+            balance = self.exchange.fetch_balance()
+            usdt_balance = balance.get('USDT', {}).get('free', 0)
+            if usdt_balance > 0:
+                print(f"[DataFetcher] Account Balance: {usdt_balance:.2f} USDT")
+                return usdt_balance
+            else:
+                print(f"[DataFetcher] WARNING: USDT balance is 0 or not found")
+                print(f"[DataFetcher] Available balances: {[k for k, v in balance.items() if v.get('free', 0) > 0]}")
+                return 0
+        except Exception as e:
+            print(f"[DataFetcher] ERROR fetching balance: {e}")
+            print(f"[DataFetcher] Using fallback balance of 10 USDT for testing")
+            return 10
 
 
 
     def fetch_ohlcv(self, symbol, timeframe, limit=1000):
         """
-        Fetch OHLCV data from Binance.
+        Fetch OHLCV data from the configured exchange.
         """
         try:
             ohlcv = self.exchange.fetch_ohlcv(symbol, timeframe, limit=limit)
             df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
             df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
             return df
+        except ccxt.AuthenticationError as e:
+            print(f"[ERROR] Authentication failed for {symbol} {timeframe}: {e}")
+            print("[ERROR] Check your API_KEY and API_SECRET in .env file")
+            print("[ERROR] Keys should not have quotes around them")
+            return None
         except Exception as e:
             print(f"Error fetching data for {symbol} {timeframe}: {e}")
             return None
