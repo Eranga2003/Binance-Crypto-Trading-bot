@@ -1,238 +1,88 @@
 import time
 import datetime
+import traceback
 from data_engine.data_fetcher import DataFetcher
-from strategy_engine.trading_logic import TradingStrategy
-from risk_manager.position_sizing import calculate_position
-from execution_engine.orders import OrderExecutor
+from technical_analysis.support_resistance import find_zones, validate_zones
 from config import EXCHANGE
 
-# ─────────────────────────────────────────────────────────────────────────────
-#  POSITION TRACKER
-# ─────────────────────────────────────────────────────────────────────────────
-
-def _progress_bar(pct, width=20):
-    """Renders a simple ASCII progress bar. pct = 0–100."""
-    filled = int(width * pct / 100)
-    bar = '█' * filled + '░' * (width - filled)
-    return f"[{bar}] {pct:.1f}%"
-
-
-def _print_order_banner(symbol, side, entry, sl, tp, order_id, size):
-    """Prints a rich banner when a new order is placed."""
-    side_emoji = '🟢 LONG' if side == 'buy' else '🔴 SHORT'
-    tp_dist    = abs(tp - entry) / entry * 100
-    sl_dist    = abs(sl - entry) / entry * 100
-    rr         = tp_dist / sl_dist if sl_dist else 0
-    print(f"""
-╔══════════════════════════════════════════════════════╗
-  ORDER PLACED — {symbol}
-  {side_emoji}  |  Size: {size:.4f}  |  ID: {order_id}
-  ──────────────────────────────────────────────────
-  Entry  : {entry:.4f}
-  TP     : {tp:.4f}   (+{tp_dist:.2f}% from entry)
-  SL     : {sl:.4f}   (-{sl_dist:.2f}% from entry)
-  R:R    : 1 : {rr:.2f}
-╚══════════════════════════════════════════════════════╝""")
-
-
-def _monitor_positions(open_positions, current_prices):
-    """
-    Checks each tracked open position against the current price.
-    - Prints TP progress % each cycle
-    - Fires TP hit or SL hit alerts
-    Returns list of symbols whose positions should be removed (TP/SL hit).
-    """
-    to_remove = []
-
-    if not open_positions:
-        return to_remove
-
-    print("\n  --- Open Positions ---")
-    for symbol, pos in open_positions.items():
-        current = current_prices.get(symbol)
-        if current is None:
-            continue
-
-        side        = pos['side']       # 'buy' or 'sell'
-        entry       = pos['entry']
-        tp          = pos['tp']
-        sl          = pos['sl']
-        order_id    = pos['order_id']
-
-        # ── TP/SL hit detection ──────────────────────────────────────────
-        tp_hit = (side == 'buy'  and current >= tp) or \
-                 (side == 'sell' and current <= tp)
-        sl_hit = (side == 'buy'  and current <= sl) or \
-                 (side == 'sell' and current >= sl)
-
-        if tp_hit:
-            profit_pct = abs(tp - entry) / entry * 100
-            print(f"  {symbol} | ID:{order_id}")
-            print(f"  🎯🎉 TP HIT! Price reached {current:.4f} | Profit: +{profit_pct:.2f}% | TRADE CLOSED")
-            to_remove.append(symbol)
-            continue
-
-        if sl_hit:
-            loss_pct = abs(sl - entry) / entry * 100
-            print(f"  {symbol} | ID:{order_id}")
-            print(f"  ❌ SL HIT. Price reached {current:.4f} | Loss: -{loss_pct:.2f}% | TRADE CLOSED")
-            to_remove.append(symbol)
-            continue
-
-        # ── Progress toward TP ───────────────────────────────────────────
-        total_range = abs(tp - entry)
-        if total_range == 0:
-            progress_pct = 0.0
-        elif side == 'buy':
-            progress_pct = max(0.0, min(100.0, (current - entry) / total_range * 100))
-        else:
-            progress_pct = max(0.0, min(100.0, (entry - current) / total_range * 100))
-
-        side_label  = 'LONG' if side == 'buy' else 'SHORT'
-        pnl_pct     = ((current - entry) / entry * 100) if side == 'buy' else ((entry - current) / entry * 100)
-        pnl_emoji   = '📈' if pnl_pct >= 0 else '📉'
-
-        print(f"  {symbol} | {side_label} | ID:{order_id}")
-        print(f"  Entry:{entry:.4f}  Now:{current:.4f}  TP:{tp:.4f}  SL:{sl:.4f}")
-        print(f"  PnL: {pnl_emoji} {pnl_pct:+.2f}%  |  To TP: {_progress_bar(progress_pct)}")
-
-    print("  " + "-" * 52)
-    return to_remove
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-#  MAIN LOOP
-# ─────────────────────────────────────────────────────────────────────────────
+def print_zones(title, support_zones, resistance_zones):
+    print(title)
+    if not support_zones and not resistance_zones:
+        print("No zones detected.")
+        return
+        
+    res_str = ", ".join([f"{z['price']:.4f}" for z in resistance_zones])
+    sup_str = ", ".join([f"{z['price']:.4f}" for z in support_zones])
+    
+    print(f"Resistance: {res_str}")
+    print(f"Support   : {sup_str}")
+    print()
 
 def main():
-    print(f"Starting {EXCHANGE.capitalize()} Price Action & SMC Trading Bot...")
-    fetcher  = DataFetcher()
-    strategy = TradingStrategy()
-    executor = OrderExecutor(fetcher.exchange)
+    print("Starting AI-powered Crypto S&R Scanner...")
+    fetcher = DataFetcher()
 
-    base_symbols = ['BTC/USDT', 'ETH/USDT', 'BNB/USDT', 'SOL/USDT', 'XRP/USDT', 'ADA/USDT', 'DOGE/USDT']
+    base_symbols = ['BTC/USDT']
     if EXCHANGE in ('binance', 'binanceusdm'):
         symbols_to_trade = [f"{symbol}:USDT" for symbol in base_symbols]
     else:
         symbols_to_trade = base_symbols
 
-    # Fetch REAL account balance from exchange
-    account_balance = fetcher.get_account_balance()
-    if account_balance <= 0:
-        print("[ERROR] Account has no USDT balance. Cannot trade. Exiting.")
-        return
-
-    # Tracks all open positions: { symbol: { side, entry, tp, sl, size, order_id } }
-    open_positions = {}
-    current_prices = {}     # Latest close price per symbol this cycle
-
     while True:
         try:
             current_time = datetime.datetime.now(datetime.UTC)
+            print(f"\n{'='*54}\n[{current_time.strftime('%Y-%m-%d %H:%M:%S UTC')}]  Starting Multi-Timeframe Scan...\n{'='*54}\n")
 
-            # 1. Check if we are in valid US market hours
-            if not strategy.check_time_filter(current_time):
-                pass  # Ignoring filter silently for testing
-
-            print(f"\n{'='*54}\n[{current_time.strftime('%H:%M:%S UTC')}]  Starting Analysis Scan...\n{'='*54}")
-
-            # ── Scan every symbol ────────────────────────────────────────
             for symbol in symbols_to_trade:
-                # 2. Fetch Data (5m Macro, 1m Micro)
-                df_macro = fetcher.fetch_ohlcv(symbol, '5m', limit=100)
-                df_micro = fetcher.fetch_ohlcv(symbol, '1m', limit=100)
+                print(f"=== {symbol} ===")
+                
+                # Fetch Data
+                # Fetching enough candles to find robust historical zones
+                df_1d  = fetcher.fetch_ohlcv(symbol, '1d', limit=200)
+                df_4h  = fetcher.fetch_ohlcv(symbol, '4h', limit=100)
+                df_1h  = fetcher.fetch_ohlcv(symbol, '1h', limit=300)
+                df_15m = fetcher.fetch_ohlcv(symbol, '15m', limit=500)
+                df_1m  = fetcher.fetch_ohlcv(symbol, '1m', limit=500)
 
-                if df_macro is None or df_micro is None:
-                    print(f"[{symbol}] Warning: Failed to fetch market data. Skipping...")
+                if any(df is None for df in [df_1d, df_4h, df_1h, df_15m, df_1m]):
+                    print(f"[{symbol}] Failed to fetch complete data. Skipping...")
                     continue
 
-                current_price = df_micro['close'].iloc[-1]
-                current_prices[symbol] = current_price
+                # Step 1: 1D Analysis (10 major zones)
+                # tolerance=0.01 (1%) for daily zones due to higher variance
+                zones_1d = find_zones(df_1d, num_support=10, num_resistance=10, window=5, tolerance=0.01)
+                
+                # Step 2: 4H Confirmation (Validate 1D zones on 4H data, pick top 5)
+                # tolerance=0.005 (0.5%) for validation
+                confirmed_4h_sup = validate_zones(df_4h, zones_1d['support'], top_n=5, tolerance=0.005)
+                confirmed_4h_res = validate_zones(df_4h, zones_1d['resistance'], top_n=5, tolerance=0.005)
 
-                # Skip signal evaluation if position already open for this symbol
-                if symbol in open_positions:
-                    continue
+                # Step 2.5: 1H Analysis
+                # To fulfill the expected output format of "1 h sup and res"
+                zones_1h = find_zones(df_1h, num_support=4, num_resistance=4, window=5, tolerance=0.005)
 
-                # 3. Evaluate Strategy
-                signal = strategy.evaluate_market(symbol, df_macro, df_micro, current_time)
+                # Step 3: 15M Refinement (4 intraday zones)
+                # tolerance=0.003 (0.3%) for 15m
+                zones_15m = find_zones(df_15m, num_support=4, num_resistance=4, window=8, tolerance=0.003)
 
-                if signal in ["BUY", "SELL"]:
-                    print(f"\n[{symbol}] *** STRATEGY SIGNAL: {signal} ***")
+                # Step 4: 1M Precision (2 scalping zones)
+                # tolerance=0.001 (0.1%) for 1m
+                zones_1m = find_zones(df_1m, num_support=2, num_resistance=2, window=10, tolerance=0.001)
 
-                    # 4. Calculate Risk & Position Sizing
-                    entry_price = current_price
-
-                    if signal == "BUY":
-                        stop_loss_price = entry_price * 0.98
-                    else:
-                        stop_loss_price = entry_price * 1.02
-
-                    pos = calculate_position(account_balance, entry_price, stop_loss_price)
-
-                    if not pos:
-                        print(f"[{symbol}] ❌ Position calculation failed - account balance may be too low")
-                        print(f"[{symbol}] Required: minimum $5 USDT for Bybit | Available: {account_balance:.2f} USDT")
-                        continue
-                    
-                    # Check if position size is reasonable
-                    position_value_usd = pos['position_size_crypto'] * entry_price
-                    if position_value_usd > account_balance * 0.25:
-                        print(f"[{symbol}] WARNING: Position size ({position_value_usd:.2f} USDT) "
-                              f"exceeds 25% of balance ({account_balance:.2f} USDT)")
-                        print(f"[{symbol}] Skipping order to avoid liquidation risk")
-                        continue
-
-                    side = 'buy' if signal == 'BUY' else 'sell'
-
-                    # 5. Send order to Bybit
-                    order = executor.place_order(
-                        symbol,
-                        side,
-                        pos['position_size_crypto'],
-                        stop_loss=pos['stop_loss_price'],
-                        take_profit=pos['take_profit_price']
-                    )
-
-                    if order:
-                        order_id = order.get('id', 'N/A')
-
-                        # 6. Print rich order banner
-                        _print_order_banner(
-                            symbol   = symbol,
-                            side     = side,
-                            entry    = entry_price,
-                            sl       = pos['stop_loss_price'],
-                            tp       = pos['take_profit_price'],
-                            order_id = order_id,
-                            size     = pos['position_size_crypto'],
-                        )
-
-                        # 7. Track position for monitoring
-                        open_positions[symbol] = {
-                            'side':     side,
-                            'entry':    entry_price,
-                            'tp':       pos['take_profit_price'],
-                            'sl':       pos['stop_loss_price'],
-                            'size':     pos['position_size_crypto'],
-                            'order_id': order_id,
-                        }
-                    else:
-                        print(f"[{symbol}] ORDER FAILED — check execution_engine logs above")
-
-            # ── Monitor open positions ───────────────────────────────────
-            hits = _monitor_positions(open_positions, current_prices)
-            for sym in hits:
-                open_positions.pop(sym, None)
-
-            print(f"\nScan complete. Sleeping for 1 second...")
-            time.sleep(1)
+                # Output exactly as user requested
+                print_zones("4h sup and res", confirmed_4h_sup, confirmed_4h_res)
+                print_zones("1 h sup  and  res", zones_1h['support'], zones_1h['resistance'])
+                print_zones("15 min- sup and res", zones_15m['support'], zones_15m['resistance'])
+                print_zones("1 min sup and re", zones_1m['support'], zones_1m['resistance'])
+                
+            print(f"Scan complete. Sleeping for 1 hour...")
+            time.sleep(3600)  # Sleep for 1 hour
 
         except Exception as e:
-            import traceback
             print(f"Error in main loop: {e}")
             print(traceback.format_exc())
+            print("Sleeping for 60 seconds before retrying...")
             time.sleep(60)
-
 
 if __name__ == "__main__":
     main()

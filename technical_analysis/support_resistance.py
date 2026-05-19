@@ -1,15 +1,9 @@
 import pandas as pd
 import numpy as np
 
-# ─────────────────────────────────────────────
-#  PIVOT DETECTION
-# ─────────────────────────────────────────────
-
 def identify_pivots(df, window=5):
     """
-    Identifies pivot highs and pivot lows in a dataframe.
-    Window specifies how many candles to the left and right must be lower/higher.
-    Changed from <= to < to allow equal values (less restrictive for smooth markets).
+    Identifies pivot highs and lows.
     """
     df = df.copy()
     df['pivot_high'] = False
@@ -20,7 +14,6 @@ def identify_pivots(df, window=5):
         is_pivot_low = True
 
         for j in range(1, window + 1):
-            # Changed <= to < for less restrictive pivot detection
             if df['high'].iloc[i] < df['high'].iloc[i - j] or df['high'].iloc[i] < df['high'].iloc[i + j]:
                 is_pivot_high = False
             if df['low'].iloc[i] > df['low'].iloc[i - j] or df['low'].iloc[i] > df['low'].iloc[i + j]:
@@ -33,272 +26,100 @@ def identify_pivots(df, window=5):
 
     return df
 
-
-# ─────────────────────────────────────────────
-#  S/R LEVEL DETECTION
-# ─────────────────────────────────────────────
-
-def get_strongest_levels(df, current_price, lookback=100, tolerance=0.002):
+def group_levels(prices, volumes, tolerance=0.005):
     """
-    Get the most powerful support and resistance levels by checking historical touches.
-    Resistance must be strictly > current_price.
-    Support must be strictly < current_price.
-    Tolerance is the % deviation allowed to count as a 'touch'.
-    
-    FALLBACK: If no pivots found, uses recent swing highs/lows.
+    Groups nearby price levels together within a percentage tolerance.
+    Returns a list of dicts: {'price': avg_price, 'touches': count, 'volume': total_vol}
     """
-    recent_df = df.tail(lookback)
-
-    all_resistances = recent_df[recent_df['pivot_high'] == True]['high'].tolist()
-    all_supports    = recent_df[recent_df['pivot_low']  == True]['low'].tolist()
-
-    # FALLBACK: If no pivots detected, get recent local extremes
-    if not all_resistances or len(all_resistances) < 2:
-        # Find recent swing highs (local peaks in 5-candle windows)
-        for i in range(5, len(recent_df) - 5):
-            window_high = recent_df['high'].iloc[i-5:i+5].max()
-            if recent_df['high'].iloc[i] >= window_high * 0.999:  # Within 0.1% of local max
-                all_resistances.append(recent_df['high'].iloc[i])
+    if not prices:
+        return []
     
-    if not all_supports or len(all_supports) < 2:
-        # Find recent swing lows (local valleys in 5-candle windows)
-        for i in range(5, len(recent_df) - 5):
-            window_low = recent_df['low'].iloc[i-5:i+5].min()
-            if recent_df['low'].iloc[i] <= window_low * 1.001:  # Within 0.1% of local min
-                all_supports.append(recent_df['low'].iloc[i])
+    # Sort together by price
+    sorted_pairs = sorted(zip(prices, volumes), key=lambda x: x[0])
+    
+    zones = []
+    current_group = [sorted_pairs[0]]
+    
+    for i in range(1, len(sorted_pairs)):
+        price, vol = sorted_pairs[i]
+        avg_group_price = sum(p for p, v in current_group) / len(current_group)
+        
+        if abs(price - avg_group_price) / avg_group_price <= tolerance:
+            current_group.append((price, vol))
+        else:
+            # Finalize group
+            avg_p = sum(p for p, v in current_group) / len(current_group)
+            total_v = sum(v for p, v in current_group)
+            zones.append({'price': avg_p, 'touches': len(current_group), 'volume': total_v})
+            current_group = [(price, vol)]
+            
+    if current_group:
+        avg_p = sum(p for p, v in current_group) / len(current_group)
+        total_v = sum(v for p, v in current_group)
+        zones.append({'price': avg_p, 'touches': len(current_group), 'volume': total_v})
+        
+    return zones
 
-    valid_resistances = [r for r in all_resistances if r > current_price]
-    valid_supports    = [s for s in all_supports    if s < current_price]
+def find_zones(df, num_support=5, num_resistance=5, window=5, tolerance=0.005):
+    """
+    Finds top support and resistance zones based on pivot touches and volume.
+    """
+    current_price = df['close'].iloc[-1]
+    
+    df_pivots = identify_pivots(df, window)
+    
+    highs = df_pivots[df_pivots['pivot_high']]['high'].tolist()
+    high_vols = df_pivots[df_pivots['pivot_high']]['volume'].tolist()
+    
+    lows = df_pivots[df_pivots['pivot_low']]['low'].tolist()
+    low_vols = df_pivots[df_pivots['pivot_low']]['volume'].tolist()
+    
+    res_zones = group_levels(highs, high_vols, tolerance)
+    sup_zones = group_levels(lows, low_vols, tolerance)
+    
+    # Filter by current price (Resistance > current, Support < current)
+    valid_res = [z for z in res_zones if z['price'] > current_price]
+    valid_sup = [z for z in sup_zones if z['price'] < current_price]
+    
+    # Score: combinations of touches and volume.
+    def compute_score(zone, all_zones):
+        if not all_zones: return 0
+        max_touches = max(z['touches'] for z in all_zones) or 1
+        max_vol = max(z['volume'] for z in all_zones) or 1
+        return (zone['touches'] / max_touches) * 0.6 + (zone['volume'] / max_vol) * 0.4
 
-    best_res, best_res_score = None, -1
-    for r in valid_resistances:
-        lb = r * (1 - tolerance)
-        ub = r * (1 + tolerance)
-        touches = len(recent_df[(recent_df['high'] >= lb) & (recent_df['high'] <= ub)])
-        if touches > best_res_score or (touches == best_res_score and (best_res is None or r < best_res)):
-            best_res_score = touches
-            best_res = r
-
-    best_sup, best_sup_score = None, -1
-    for s in valid_supports:
-        lb = s * (1 - tolerance)
-        ub = s * (1 + tolerance)
-        touches = len(recent_df[(recent_df['low'] >= lb) & (recent_df['low'] <= ub)])
-        if touches > best_sup_score or (touches == best_sup_score and (best_sup is None or s > best_sup)):
-            best_sup_score = touches
-            best_sup = s
-
+    for z in valid_res: z['score'] = compute_score(z, valid_res)
+    for z in valid_sup: z['score'] = compute_score(z, valid_sup)
+    
+    # Sort by score descending
+    valid_res.sort(key=lambda x: x['score'], reverse=True)
+    valid_sup.sort(key=lambda x: x['score'], reverse=True)
+    
     return {
-        'resistance': best_res,
-        'support': best_sup,
-        'res_touches': best_res_score,
-        'sup_touches': best_sup_score
+        'resistance': valid_res[:num_resistance],
+        'support': valid_sup[:num_support]
     }
 
-
-def detect_level_touch(df, level, tolerance=0.002):
+def validate_zones(df, zones, top_n=5, tolerance=0.005):
     """
-    Returns True if the latest candle's high/low came within the tolerance band of the level.
-    Works for both resistance (candle high approaches from below) and support (candle low approaches from above).
+    Takes an existing list of zones and counts how many times they've been touched
+    on this new dataframe (lower timeframe).
+    zones format: [{'price': X, ...}, ...]
     """
-    latest = df.iloc[-1]
-    lower = level * (1 - tolerance)
-    upper = level * (1 + tolerance)
-    # Either the high or low is inside the tolerance band
-    return (lower <= latest['high'] <= upper) or (lower <= latest['low'] <= upper)
-
-
-def detect_body_breakout(df, index, level, is_resistance):
-    """
-    Detects if a breakout happened with a body close, not just a wick.
-    is_resistance=True  → look for bullish body close ABOVE resistance level
-    is_resistance=False → look for bearish body close BELOW support level
-    """
-    close_price = df['close'].iloc[index]
-    open_price  = df['open'].iloc[index]
-
-    if is_resistance:
-        return close_price > level and close_price > open_price
-    else:
-        return close_price < level and close_price < open_price
-
-
-def detect_break(df, level, is_resistance):
-    """
-    Checks the latest candle for a body-close breakout beyond `level`.
-    """
-    return detect_body_breakout(df, -1, level, is_resistance)
-
-
-def detect_pullback_to_level(df, level, is_resistance, tolerance=0.003):
-    """
-    After a breakout, checks if price has pulled back to touch the broken level
-    (now a flipped zone) on the latest candle of the 5m timeframe.
-
-    After resistance is broken (bullish), the old resistance becomes new support.
-    A pullback means price comes back DOWN to that level → low touches it.
-
-    After support is broken (bearish), the old support becomes new resistance.
-    A pullback means price comes back UP to that level → high touches it.
-    """
-    latest = df.iloc[-1]
-    lower  = level * (1 - tolerance)
-    upper  = level * (1 + tolerance)
-
-    if is_resistance:
-        # Bullish break: old Res is now Sup. Pullback = candle low touches it.
-        return lower <= latest['low'] <= upper
-    else:
-        # Bearish break: old Sup is now Res. Pullback = candle high touches it.
-        return lower <= latest['high'] <= upper
-
-
-def detect_choch(df, is_resistance, lookback=10):
-    """
-    Detects a Change of Character (ChoCh) — a structural reversal after a level touch.
-
-    From Resistance: price touched resistance but did NOT break it.
-    ChoCh = a recent candle prints a LOWER LOW than the candle before it,
-    confirming bearish intent (market is turning down from resistance).
-
-    From Support: price touched support but did NOT break it.
-    ChoCh = a recent candle prints a HIGHER HIGH than the candle before it,
-    confirming bullish intent (market is turning up from support).
-
-    Uses the last `lookback` candles to find the structural shift.
-    """
-    if len(df) < lookback + 2:
-        return False
-
-    recent = df.tail(lookback)
-
-    if is_resistance:
-        # Bearish ChoCh: look for a lower low compared to previous candle's low
-        for i in range(1, len(recent)):
-            if recent['low'].iloc[i] < recent['low'].iloc[i - 1]:
-                return True
-    else:
-        # Bullish ChoCh: look for a higher high compared to previous candle's high
-        for i in range(1, len(recent)):
-            if recent['high'].iloc[i] > recent['high'].iloc[i - 1]:
-                return True
-
-    return False
-
-
-# ─────────────────────────────────────────────
-#  TRENDLINE DETECTION
-# ─────────────────────────────────────────────
-
-def get_trendlines(df, window=5, lookback=60):
-    """
-    Detects the most recent descending resistance trendline and ascending support trendline
-    by fitting a line through the last two valid pivot highs / pivot lows.
-
-    Returns dict:
-        {
-            'res_trendline': {'slope': float, 'intercept': float, 'current_value': float} | None,
-            'sup_trendline': {'slope': float, 'intercept': float, 'current_value': float} | None,
-        }
-    
-    FALLBACK: If not enough pivots, uses recent swing extremes.
-    """
-    # Reset to clean 0-based positional index so all lookups are consistent
-    df_pivots = identify_pivots(df.tail(lookback), window=window).reset_index(drop=True)
-    n = len(df_pivots)
-
-    # --- Descending Resistance Trendline (connecting pivot HIGHS) ---
-    # Get positional indices (0-based) of all pivot highs
-    pivot_high_positions = df_pivots.index[df_pivots['pivot_high'] == True].tolist()
-
-    # FALLBACK: If not enough pivot highs, find recent swing highs
-    if len(pivot_high_positions) < 2:
-        for i in range(5, len(df_pivots) - 5):
-            window_high = df_pivots['high'].iloc[max(0, i-5):i+5].max()
-            if df_pivots['high'].iloc[i] >= window_high * 0.99:
-                pivot_high_positions.append(i)
-        pivot_high_positions = sorted(list(set(pivot_high_positions)))[-2:]  # Keep last 2
-
-    res_tl = None
-    if len(pivot_high_positions) >= 2:
-        idx1, idx2 = pivot_high_positions[-2], pivot_high_positions[-1]
-        price1 = df_pivots['high'].iloc[idx1]
-        price2 = df_pivots['high'].iloc[idx2]
-        slope       = (price2 - price1) / (idx2 - idx1) if idx2 != idx1 else 0
-        intercept   = price1 - slope * idx1
-        current_val = slope * (n - 1) + intercept
-        res_tl = {'slope': slope, 'intercept': intercept, 'current_value': current_val}
-
-    # --- Ascending Support Trendline (connecting pivot LOWS) ---
-    pivot_low_positions = df_pivots.index[df_pivots['pivot_low'] == True].tolist()
-
-    # FALLBACK: If not enough pivot lows, find recent swing lows
-    if len(pivot_low_positions) < 2:
-        for i in range(5, len(df_pivots) - 5):
-            window_low = df_pivots['low'].iloc[max(0, i-5):i+5].min()
-            if df_pivots['low'].iloc[i] <= window_low * 1.01:
-                pivot_low_positions.append(i)
-        pivot_low_positions = sorted(list(set(pivot_low_positions)))[-2:]  # Keep last 2
-
-    sup_tl = None
-    if len(pivot_low_positions) >= 2:
-        idx1, idx2 = pivot_low_positions[-2], pivot_low_positions[-1]
-        price1 = df_pivots['low'].iloc[idx1]
-        price2 = df_pivots['low'].iloc[idx2]
-        slope       = (price2 - price1) / (idx2 - idx1) if idx2 != idx1 else 0
-        intercept   = price1 - slope * idx1
-        current_val = slope * (n - 1) + intercept
-        sup_tl = {'slope': slope, 'intercept': intercept, 'current_value': current_val}
-
-    return {'res_trendline': res_tl, 'sup_trendline': sup_tl}
-
-
-def detect_trendline_touch(current_price, trendline, tolerance=0.002):
-    """
-    Returns True if the current price is within tolerance % of the trendline's current value.
-    """
-    if trendline is None:
-        return False
-    tl_val = trendline['current_value']
-    if tl_val <= 0:
-        return False
-    return abs(current_price - tl_val) / tl_val <= tolerance
-
-
-def detect_trendline_break(df, trendline, is_resistance, tolerance=0.002):
-    """
-    Returns True if the latest candle body-closed beyond the trendline value.
-    is_resistance=True  → bullish break: close > trendline value (break above descending res TL)
-    is_resistance=False → bearish break: close < trendline value (break below ascending sup TL)
-    """
-    if trendline is None:
-        return False
-    tl_val = trendline['current_value']
-    close  = df['close'].iloc[-1]
-    open_  = df['open'].iloc[-1]
-
-    if is_resistance:
-        return close > tl_val and close > open_
-    else:
-        return close < tl_val and close < open_
-
-
-def detect_trendline_pullback(df, trendline, is_resistance, tolerance=0.003):
-    """
-    After a trendline break, checks if price pulls back to the trendline level.
-    """
-    if trendline is None:
-        return False
-    tl_val = trendline['current_value']
-    if tl_val <= 0:
-        return False
-    latest = df.iloc[-1]
-    lower  = tl_val * (1 - tolerance)
-    upper  = tl_val * (1 + tolerance)
-
-    if is_resistance:
-        # Bullish TL break → old TL is now support → pullback = low touches it
-        return lower <= latest['low'] <= upper
-    else:
-        # Bearish TL break → old TL is now resistance → pullback = high touches it
-        return lower <= latest['high'] <= upper
+    validated = []
+    for zone in zones:
+        p = zone['price']
+        upper = p * (1 + tolerance)
+        lower = p * (1 - tolerance)
+        
+        # Check how many candles' high/low span crossed this price band
+        touches = len(df[(df['high'] >= lower) & (df['low'] <= upper)])
+        validated.append({
+            'price': p,
+            'touches': touches,  # the number of confirmations on this TF
+            'original_score': zone.get('score', 0)
+        })
+        
+    # Sort by number of touches in this new timeframe
+    validated.sort(key=lambda x: x['touches'], reverse=True)
+    return validated[:top_n]

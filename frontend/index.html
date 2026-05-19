@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>S&R AI Dashboard</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <script src="https://unpkg.com/lightweight-charts@4.1.1/dist/lightweight-charts.standalone.production.js"></script>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="app-container">
+        <header>
+            <div class="logo">
+                <div class="logo-icon"></div>
+                <h1>Crypto AI Scanner</h1>
+            </div>
+            <div class="controls">
+                <select id="symbolSelect">
+                    <option value="BTC/USDT:USDT">BTC / USDT</option>
+                    <option value="ETH/USDT:USDT">ETH / USDT</option>
+                    <option value="SOL/USDT">SOL / USDT</option>
+                    <option value="BNB/USDT">BNB / USDT</option>
+                    <option value="XRP/USDT">XRP / USDT</option>
+                </select>
+                <div class="timeframe-selector" id="timeframeSelect">
+                    <button data-tf="4h" class="active">4H</button>
+                    <button data-tf="1h">1H</button>
+                    <button data-tf="15m">15M</button>
+                    <button data-tf="1m">1M</button>
+                </div>
+            </div>
+        </header>
+
+        <main>
+            <div class="chart-panel glass-panel">
+                <div class="chart-header">
+                    <h2>Market Chart</h2>
+                    <span id="statusIndicator" class="status loading">Loading...</span>
+                </div>
+                <div id="tvchart" class="chart-container"></div>
+            </div>
+            
+            <div class="side-panel">
+                <div class="levels-panel glass-panel">
+                    <h2>Resistance Zones</h2>
+                    <ul id="resList" class="level-list res-list">
+                        <!-- Populated by JS -->
+                    </ul>
+                </div>
+                
+                <div class="levels-panel glass-panel">
+                    <h2>Support Zones</h2>
+                    <ul id="supList" class="level-list sup-list">
+                        <!-- Populated by JS -->
+                    </ul>
+                </div>
+            </div>
+        </main>
+    </div>
+    <script src="app.js"></script>
+</body>
+</html>
