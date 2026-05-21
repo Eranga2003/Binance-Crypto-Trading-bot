@@ -27,11 +27,13 @@ class DataFetcher:
 
         if EXCHANGE == 'bybit':
             self.exchange = ccxt.bybit({
-                'apiKey': API_KEY,
-                'secret': API_SECRET,
+                # 'apiKey': API_KEY,
+                # 'secret': API_SECRET,
                 'enableRateLimit': True,
                 'options': {
                     'defaultType': 'swap',
+                    'adjustForTimeDifference': True,
+                    'recvWindow': 60000,
                 },
             })
             if TESTNET:
@@ -40,8 +42,8 @@ class DataFetcher:
             symbol_note = 'BASE/USDT'
         elif EXCHANGE in ('binance', 'binanceusdm'):
             self.exchange = ccxt.binanceusdm({
-                'apiKey': API_KEY,
-                'secret': API_SECRET,
+                # 'apiKey': API_KEY,
+                # 'secret': API_SECRET,
                 'enableRateLimit': True,
             })
             exchange_name = 'Binance USDT-M Futures'

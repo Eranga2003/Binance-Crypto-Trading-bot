@@ -3,6 +3,7 @@ from flask_cors import CORS
 from data_engine.data_fetcher import DataFetcher
 from technical_analysis.support_resistance import find_zones, validate_zones
 import traceback
+import pandas as pd
 
 app = Flask(__name__)
 CORS(app)
@@ -29,7 +30,9 @@ def get_data():
         df = df.drop_duplicates(subset=['timestamp'])
         df = df.sort_values('timestamp')
         # Lightweight charts expects: {time: unix_timestamp, open: O, high: H, low: L, close: C}
-        df['time'] = df['timestamp'].astype('int64') // 10**9
+        df['time'] = df['timestamp'].apply(lambda x: int(x.timestamp()) if pd.notnull(x) else 0)
+        df = df.drop_duplicates(subset=['time'], keep='last')
+        df = df.sort_values('time')
         candles = []
         for _, row in df.iterrows():
             candles.append({

@@ -9,7 +9,7 @@ const supList = document.getElementById('supList');
 const statusIndicator = document.getElementById('statusIndicator');
 
 // State
-let currentSymbol = 'BTC/USDT:USDT';
+let currentSymbol = 'BTC/USDT';
 let currentTimeframe = '4h';
 let chart, candleSeries;
 let currentPriceLines = [];
@@ -109,6 +109,7 @@ async function fetchData() {
         
         if (dataObj.error) throw new Error(dataObj.error);
         candleSeries.setData(dataObj.candles);
+        chart.timeScale().fitContent();
         
         // Fetch Levels
         updateStatus('loading', 'Scanning S&R Zones...');
